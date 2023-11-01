@@ -7,7 +7,7 @@ from datetime import date
 from datetime import datetime
 from datetime import timedelta
 
-# check method
+# check method - tells user whether the provided config file provided is valid
 def _call_api (ticker, token):
   time_format = '%Y-%m-%d'
   today = date.today()
@@ -34,7 +34,31 @@ def get_input_file_path(filepath):
   else:
     return os.path.join(os.getcwd(), filepath)
 
-# Spec method
+# discover method - outputs a Catalog, a struct that declares the Streams and Fields (Airbyte's equivalent of tables and columns) output by the connector. Also includes metadata around which features a connector supports (e.g. which sync modes). I.e. discover describes what data is available in the source.
+def discover():
+  catalog = {
+    'streams': [{
+      'name': 'stock_prices',
+      'supported_sync_modes': ['full_refresh'],
+      'json_schema': {
+        'properties': {
+          'date': {
+            'type': 'string'
+          },
+          'price': {
+            'type': 'number'
+          },
+           'stock_ticker': {
+             'type': 'string'
+           }
+        }
+      }
+    }]
+  }
+  airbyte_message = { 'type': 'CATALOG', 'catalog': catalog }
+  print(json.dumps(airbyte_message))
+
+# Spec method - decide which inputs are needed from user in order to connect to source (stock ticker API) and encode it as a JSON file. Also identifies when connector has been invoked with spec operation and return the spec as an AirbyteMessage
 def read_json(filepath):
   with open(filepath, 'r') as f:
     return json.loads(f.read())
@@ -72,6 +96,11 @@ def run(args):
   required_check_parser = check_parser.add_argument_group('required named arguments')
   required_check_parser.add_argument('--config', type=str, required=True, help='path to the json config file')
 
+  # Accept the discover command
+  discover_parser = subparsers.add_parser('discover', help='outputs a catalog describing the source\'s schema', parents=[parent_parser])
+  required_discover_parser = discover_parser.add_argument_group('required namned arguments')
+  required_discover_parser.add_argument('--config', type=str, required=True, help='path to the json config file')
+
   parsed_args = main_parser.parse_args(args)
   command = parsed_args.command
 
@@ -81,9 +110,11 @@ def run(args):
     config_file_path = get_input_file_path(parsed_args.config)
     config = read_json(config_file_path)
     check(config)
+  elif command == 'discover':
+    discover()
   else:
     # If we don't recognize the command log, exit with an error code greater than zero to indicate the process had a failure
-    log("Invalid command. Allowable commands: [spec, check]")
+    log("Invalid command. Allowable commands: [spec, check, discover]")
     sys.exit(1)
 
   # A zero exit means the process successfully completed
