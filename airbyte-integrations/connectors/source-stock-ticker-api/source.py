@@ -58,6 +58,51 @@ def discover():
   airbyte_message = { 'type': 'CATALOG', 'catalog': catalog }
   print(json.dumps(airbyte_message))
 
+# Read method - bread and butter method
+def log_error(error_message):
+  current_time_in_ms = int(datetime.now().timestamp()) * 1000
+  log_json = { 'type': 'TRACE', 'trace': { 'type': 'ERROR', 'emitted_at': current_time_in_ms, 'error': { 'message': error_message }}}
+  print(json.dumps(log_json))
+
+def read(config, catalog):
+  # Assert required config was provided and valid
+  if 'api_key' not in config or 'stock_ticker' not in config:
+    log_error('Input config must contain the properties \'api_key\' and \'stock_ticker\'')
+    sys.exit(1)
+
+  # Find the stock prices stream if it was present in the input catalog
+  stock_prices_stream = None
+  for configured_stream in catalog['streams']:
+    if configured_stream['stream']['name'] == 'stock_prices':
+      stock_prices_stream = configured_stream
+
+  if stock_prices_stream == None:
+    log_error('No stream selected.')
+    sys.exit(1)
+
+  # Only full refresh is supported currently, so throw error if other sync mode is request
+  if stock_prices_stream['sync_mode'] != 'full_refresh':
+    log_error('This connector only supports full refresh syncs!')
+    sys.exit(1)
+
+  # At this point, the config and catalogs are confirmed valid, and now the stock price data can be pulled
+  response = _call_api(ticker=config['stock_ticker'], token=config['api_key'])
+  if response.status_code != 200:
+    log_error('Failure occured when calling Polygon.io API')
+    sys.exit(1)
+  else:
+    results = response.json()['results']
+    for result in results:
+      data = { 'date': date.fromtimestamp(result['t']/1000).isoformat(), 'stock_ticker': config['stock_ticker'], 'price': result['c'] }
+      record = { 'stream': 'stock_prices', 'data': data, 'emitted_at': int(datetime.now().timestamp()) * 1000 }
+      output_message = { 'type': 'RECORD', 'record': record }
+      print(json.dumps(output_message))
+
+
+
+
+
+
 # Spec method - decide which inputs are needed from user in order to connect to source (stock ticker API) and encode it as a JSON file. Also identifies when connector has been invoked with spec operation and return the spec as an AirbyteMessage
 def read_json(filepath):
   with open(filepath, 'r') as f:
@@ -101,6 +146,13 @@ def run(args):
   required_discover_parser = discover_parser.add_argument_group('required namned arguments')
   required_discover_parser.add_argument('--config', type=str, required=True, help='path to the json config file')
 
+  # Accept the read command
+  read_parser = subparsers.add_parser('read', help='read the source and outputs messages to STDOUT', parents=[parent_parser])
+  read_parser.add_argument('--state', type=str, required=False, help='path to the json-encoded state file')
+  required_read_parser = read_parser.add_argument_group('required named arguments')
+  required_read_parser.add_argument('--config', type=str, required=True, help='path to the json config file')
+  required_read_parser.add_argument('--catalog', type=str, required=True, help='path to the catalog used to determine which data to read')
+
   parsed_args = main_parser.parse_args(args)
   command = parsed_args.command
 
@@ -112,9 +164,13 @@ def run(args):
     check(config)
   elif command == 'discover':
     discover()
+  elif command == 'read':
+    config = read_json(get_input_file_path(parsed_args.config))
+    catalog = read_json(get_input_file_path(parsed_args.catalog))
+    read(config, catalog)
   else:
     # If we don't recognize the command log, exit with an error code greater than zero to indicate the process had a failure
-    log("Invalid command. Allowable commands: [spec, check, discover]")
+    log_error("Invalid command. Allowable commands: [spec, check, discover, read]")
     sys.exit(1)
 
   # A zero exit means the process successfully completed
