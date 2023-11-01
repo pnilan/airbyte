@@ -1,9 +1,17 @@
-FROM scratch
+FROM python:3.9-slim
 
-## TODO Add your dockerfile instructions here
-## TODO uncomment the below line. This is required for Kubernetes compatibility.
-# ENV AIRBYTE_ENTRYPOINT="update this with the command you use for an entrypoint"
+WORKDIR /airbyte/integration_code
+# install any python dependencies
+RUN pip install requests
+
+# Copy source files
+COPY source.py .
+COPY spec.json .
+
+ENTRYPOINT ["python", "/airbyte/integration_code/source.py"]
 
 # Airbyte's build system uses these labels to know what to name and tag the docker images produced by this Dockerfile.
 LABEL io.airbyte.name=airbyte/source-stock-ticker-api
 LABEL io.airbyte.version=0.1.0
+
+ENV AIRBYTE_ENTRYPOINT='python /airbyte/integration_code/source.py'
