@@ -24,5 +24,8 @@ acceptance_tests:
     tests:
       - config_path: secrets/valid_config.json
         spec_path: spec.json
-  # incremental:
-  #   bypass_reason: "This connector does not implement incremental sync"
+#  incremental: # TODO uncomment this once you implement incremental sync in part 2 of the tutorial
+#    tests:
+#    - config_path: "secrets/config.json"
+#      configured_catalog_path: "integration_tests/configured_catalog.json"
+#      future_state_path: "integration_tests/abnormal_state.json"
