@@ -12,6 +12,10 @@ from airbyte_cdk.sources.streams import Stream
 from airbyte_cdk.sources.streams.http import HttpStream
 from airbyte_cdk.sources.streams.http.auth import TokenAuthenticator
 
+from datetime import date
+from datetime import datetime
+from datetime import timedelta
+
 """
 TODO: Most comments in this class are instructive and should be deleted after the source is implemented.
 
@@ -182,18 +186,26 @@ class Employees(IncrementalStockTickerApiStream):
 
 # Source
 class SourceStockTickerApi(AbstractSource):
+
+    def __call_api(self, config):
+        today = date.today()
+        to_day = today.strftime("%Y-%m-%d")
+        from_day = (today - timedelta(days=7)).strftime("%Y-%m-%d")
+        ticker = config['stock_ticker']
+        token = config['api_key']
+        return requests.get(f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{from_day}/{to_day}?sort=asc&limit=120&apiKey={token}")
+
     def check_connection(self, logger, config) -> Tuple[bool, any]:
-        """
-        TODO: Implement a connection check to validate that the user-provided config can be used to connect to the underlying API
-
-        See https://github.com/airbytehq/airbyte/blob/master/airbyte-integrations/connectors/source-stripe/source_stripe/source.py#L232
-        for an example.
-
-        :param config:  the user-input config object conforming to the connector's spec.yaml
-        :param logger:  logger object
-        :return Tuple[bool, any]: (True, None) if the input config can be used to connect to the API successfully, (False, error) otherwise.
-        """
-        return True, None
+        response = self.__call_api(config)
+        if response.status_code == 200:
+            result = {"status": "SUCCEEDED"}
+            return [True, result]
+        elif response.status_code == 403:
+            result = {"status": "FAILED", "message": "API Key is incorrect."}
+            return [False, result]
+        else:
+            result = {"status": "FAILED", "message": "Input configuration is incorrect. Please verify the input stock ticker and API key."}
+            return [False, result]
 
     def streams(self, config: Mapping[str, Any]) -> List[Stream]:
         """
