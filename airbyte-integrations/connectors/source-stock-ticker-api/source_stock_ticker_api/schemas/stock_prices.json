@@ -1,0 +1,19 @@
+{
+  "type": "object",
+  "required": [
+    "date",
+    "price",
+    "stock_ticker"
+  ],
+  "properties": {
+    "date": {
+      "type": "string"
+    },
+    "price": {
+      "type": "number"
+    },
+    "stock_ticker" : {
+      "type": "string"
+    }
+  }
+}
