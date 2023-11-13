@@ -125,9 +125,14 @@ class IncrementalStockTickerApiStream(StockTickerApiStream, ABC):
         return {}
 
 class StockPrices(HttpStream):
-    url_base = ''
+    url_base = 'https://api.polygon.io/v2/aggs/ticker/'
 
     primary_key = None
+
+    def __init__(self, config: Mapping[str, Any], **kwargs):
+        super().__init__()
+        self.stock_ticker = config['stock_ticker']
+        self.api_key = config['api_key']
 
     def next_page_token(self, response: requests.Response) -> Optional[Mapping[str, Any]]:
       # No pagination
@@ -139,8 +144,15 @@ class StockPrices(HttpStream):
             stream_slice: Mapping[str, Any] = None,
             next_page_token: Mapping[str, Any] = None
     ) -> str:
-        # Todo
-        return ''
+        return f"{self.stock_ticker}/prev"
+
+    def request_params(
+            self,
+            stream_state: Mapping[str, Any] = None,
+            stream_slice: Mapping[str, Any] = None,
+            next_page_token: Mapping[str, Any] = None
+    ) -> MutableMapping[str, Any]:
+        return {"adjusted": 'true', "apiKey": self.api_key}
 
     def parse_response(
             self,
@@ -149,8 +161,8 @@ class StockPrices(HttpStream):
             stream_slice: Mapping[str, Any] = None,
             next_page_token: Mapping[str, Any] = None,
     ) -> Iterable[Mapping]:
-        # Todo
-        return None
+        result = response.json()
+        return [result]
 
 
 
@@ -179,4 +191,4 @@ class SourceStockTickerApi(AbstractSource):
 
     def streams(self, config: Mapping[str, Any]) -> List[Stream]:
         auth = NoAuth()
-        return [StockPrices(authenticator=auth)]
+        return [StockPrices(authenticator=auth, config=config)]
