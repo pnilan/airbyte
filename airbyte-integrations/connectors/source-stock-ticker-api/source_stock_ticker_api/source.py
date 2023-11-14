@@ -9,12 +9,11 @@ from typing import Any, Iterable, List, Mapping, MutableMapping, Optional, Tuple
 import requests
 from airbyte_cdk.sources import AbstractSource
 from airbyte_cdk.sources.streams import Stream
+from airbyte_cdk.sources.streams import IncrementalMixin
 from airbyte_cdk.sources.streams.http import HttpStream
 from airbyte_cdk.sources.streams.http.auth import NoAuth
 
-from datetime import date
-from datetime import datetime
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 
 """
 TODO: Most comments in this class are instructive and should be deleted after the source is implemented.
@@ -124,15 +123,30 @@ class IncrementalStockTickerApiStream(StockTickerApiStream, ABC):
         """
         return {}
 
-class StockPrices(HttpStream):
+class StockPrices(HttpStream, IncrementalMixin):
     url_base = 'https://api.polygon.io/v2/aggs/ticker/'
+    cursor_field = "date"
+    primary_key = "date"
 
-    primary_key = None
-
-    def __init__(self, config: Mapping[str, Any], **kwargs):
+    def __init__(self, config: Mapping[str, Any], start_date: datetime, **kwargs):
         super().__init__()
         self.stock_ticker = config['stock_ticker']
         self.api_key = config['api_key']
+        self.start_date = start_date
+        self._cursor_value = None
+
+    @property
+    def state(self) -> Mapping[str, Any]:
+        if self._cursor_value:
+            return { self.cursor_field: self._cursor_value.strftime('%Y-%m-%d') }
+        else:
+            return { self.cursor_field: self.start_date.strftime('%Y-%m-%d') }
+
+
+    @state.setter
+    def state(self, value: Mapping[str, Any]):
+      self._cursor_value =  datetime.strptime(value[self.cursor_field], '%Y-%m-%d')
+
 
     def next_page_token(self, response: requests.Response) -> Optional[Mapping[str, Any]]:
       # No pagination
@@ -144,7 +158,9 @@ class StockPrices(HttpStream):
             stream_slice: Mapping[str, Any] = None,
             next_page_token: Mapping[str, Any] = None
     ) -> str:
-        return f"{self.stock_ticker}/prev"
+        from_date = stream_slice['date']
+        to_date = stream_slice['date']
+        return f"{self.stock_ticker}/range/1/day/{from_date}/{to_date}"
 
     def request_params(
             self,
@@ -152,7 +168,26 @@ class StockPrices(HttpStream):
             stream_slice: Mapping[str, Any] = None,
             next_page_token: Mapping[str, Any] = None
     ) -> MutableMapping[str, Any]:
-        return {"adjusted": 'true', "apiKey": self.api_key}
+        return {"apiKey": self.api_key}
+
+    def read_records(self, *args, **kwargs) -> Iterable[Mapping[str, Any]]:
+        for record in super().read_records(*args, **kwargs):
+            if self._cursor_value:
+                latest_current_date = datetime.strptime(record[self.cursor_field], '%Y-%m-%d')
+                self._cursor_value = max(self._cursor_value, latest_current_date)
+            yield record
+
+    def _chunk_date_range(self, start_date: datetime) -> List[Mapping[str, Any]]:
+        # Returns list of each day between start date and now. Return value is a list of dicts { 'date': date_string }
+        dates = []
+        while start_date < datetime.now():
+            dates.append({self.cursor_field: start_date.strftime('%Y-%m-%d')})
+            start_date += timedelta(days=1)
+        return dates
+
+    def stream_slices(self, sync_mode, cursor_field: List[str] = None, stream_state: Mapping[str, Any] = None) -> Iterable[Optional[Mapping[str, Any]]]:
+        start_date = datetime.strptime(stream_state[self.cursor_field], '%Y-%m-%d') if stream_state and self.cursor_field in stream_state else self.start_date
+        return self._chunk_date_range(start_date)
 
     def parse_response(
             self,
@@ -191,4 +226,5 @@ class SourceStockTickerApi(AbstractSource):
 
     def streams(self, config: Mapping[str, Any]) -> List[Stream]:
         auth = NoAuth()
-        return [StockPrices(authenticator=auth, config=config)]
+        start_date = datetime.strptime(config['start_date'], '%Y-%m-%d')
+        return [StockPrices(authenticator=auth, config=config, start_date=start_date)]
